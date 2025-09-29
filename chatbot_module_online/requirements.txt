@@ -1,0 +1,12 @@
+
+fastapi==0.95.2
+uvicorn[standard]==0.21.1
+python-multipart==0.0.6
+cohere>=5.16.0
+supabase
+PyPDF2
+python-docx
+cryptography
+httpx
+tenacity
+
