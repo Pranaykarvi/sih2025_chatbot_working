@@ -30,11 +30,3 @@ export async function POST(request: Request) {
   }
 }
 
-// Increase the limit for the request body size
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '10mb',
-    },
-  },
-};
