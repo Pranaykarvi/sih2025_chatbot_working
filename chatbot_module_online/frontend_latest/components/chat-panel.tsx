@@ -47,10 +47,13 @@ export default function ChatPanel() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  // Ref for the input bar (type bar)
+  const inputBarRef = useRef<HTMLDivElement>(null)
 
-  function scrollToEnd() {
+  // Scrolls to the input bar (type bar) at the bottom
+  function scrollToInputBar() {
     requestAnimationFrame(() => {
-      listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" })
+      inputBarRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
     })
   }
 
@@ -72,7 +75,8 @@ export default function ChatPanel() {
     setMessages((prev) => [...prev, userMsg])
     setInput("")
     setLoading(true)
-    scrollToEnd()
+    // Scroll to input bar after user message
+    scrollToInputBar()
 
     try {
       const res = await fetch("/api/ask", {
@@ -105,59 +109,62 @@ export default function ChatPanel() {
       setMessages((prev) => [...prev, aiMsg])
     } finally {
       setLoading(false)
-      scrollToEnd()
+      // Scroll to input bar after assistant message
+      scrollToInputBar()
     }
   }
 
   return (
-    <div className="w-full h-[70vh] flex flex-col rounded-2xl shadow-2xl bg-gradient-to-br from-white via-blue-100 to-pink-100 dark:from-background dark:via-accent/30 dark:to-primary/20 border border-border overflow-hidden">
+    <div className="w-full h-[70vh] relative rounded-2xl shadow-2xl bg-gradient-to-br from-white via-blue-100 to-pink-100 dark:from-background dark:via-accent/30 dark:to-primary/20 border border-border overflow-hidden">
       <header className="px-6 py-4 border-b border-border flex items-center gap-2 bg-gradient-to-r from-pink-200/60 via-blue-200/60 to-green-200/60 dark:from-accent/30 dark:to-primary/10">
         <span className="text-2xl font-bold text-accent">ArogyaLink Chatbot</span>
         <span className="ml-auto text-xs text-muted-foreground">Ask a medical question based on uploaded records.</span>
       </header>
-      <main className="flex-1 flex flex-col gap-0 p-0">
-        <div className="flex-1 overflow-y-auto px-6 py-4" ref={listRef} role="list" aria-live="polite">
-          {messages.length === 0 ? (
-            <p className="text-sm text-muted-foreground mt-10 text-center">Your conversation will appear here.</p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {messages.map((m) => (
-                <div key={m.id} className="space-y-2">
-                  <ChatBubble role={m.role}>{m.text}</ChatBubble>
-                  {m.role === "assistant" && m.sources && m.sources.length > 0 && (
-                    <Accordion type="single" collapsible className="max-w-[85%]">
-                      <AccordionItem value={`sources-${m.id}`}>
-                        <AccordionTrigger className="text-sm">Sources</AccordionTrigger>
-                        <AccordionContent>
-                          <ul className="list-disc pl-5 text-sm">
-                            {m.sources.map((s, idx) => (
-                              <li key={idx}>
-                                <span className="font-medium">{s.pdf}</span>{" "}
-                                <span className="text-muted-foreground">
-                                  (chunk {s.chunkId}, score {s.score.toFixed(3)})
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </AccordionContent>
-                      </AccordionItem>
-                    </Accordion>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          {loading && (
-            <div className="mt-3 flex gap-1 pl-1">
-              <span className="h-2 w-2 animate-bounce rounded-full bg-pink-400 [animation-delay:-0.2s]" />
-              <span className="h-2 w-2 animate-bounce rounded-full bg-blue-400 [animation-delay:-0.1s]" />
-              <span className="h-2 w-2 animate-bounce rounded-full bg-green-400" />
-              <span className="sr-only">Assistant is typing</span>
-            </div>
-          )}
-        </div>
-      </main>
-      <form onSubmit={onSubmit} className="p-6 bg-gradient-to-r from-pink-100/60 via-blue-100/60 to-green-100/60 dark:from-background dark:to-accent/10 border-t border-border flex flex-col gap-3">
+      {/* Message list is scrollable, input bar is absolutely fixed at bottom */}
+      <div className="absolute inset-x-0 top-[72px] bottom-[96px] overflow-y-auto px-6 py-4" ref={listRef} role="list" aria-live="polite">
+        {messages.length === 0 ? (
+          <p className="text-sm text-muted-foreground mt-10 text-center">Your conversation will appear here.</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {messages.map((m) => (
+              <div key={m.id} className="space-y-2">
+                <ChatBubble role={m.role}>{m.text}</ChatBubble>
+                {m.role === "assistant" && m.sources && m.sources.length > 0 && (
+                  <Accordion type="single" collapsible className="max-w-[85%]">
+                    <AccordionItem value={`sources-${m.id}`}>
+                      <AccordionTrigger className="text-sm">Sources</AccordionTrigger>
+                      <AccordionContent>
+                        <ul className="list-disc pl-5 text-sm">
+                          {m.sources.map((s, idx) => (
+                            <li key={idx}>
+                              <span className="font-medium">{s.pdf}</span>{" "}
+                              <span className="text-muted-foreground">
+                                (chunk {s.chunkId}, score {s.score.toFixed(3)})
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {loading && (
+          <div className="mt-3 flex gap-1 pl-1">
+            <span className="h-2 w-2 animate-bounce rounded-full bg-pink-400 [animation-delay:-0.2s]" />
+            <span className="h-2 w-2 animate-bounce rounded-full bg-blue-400 [animation-delay:-0.1s]" />
+            <span className="h-2 w-2 animate-bounce rounded-full bg-green-400" />
+            <span className="sr-only">Assistant is typing</span>
+          </div>
+        )}
+        {/* Invisible div for scrolling to input bar */}
+        <div ref={inputBarRef} />
+      </div>
+      {/* Input bar absolutely fixed at bottom */}
+      <form onSubmit={onSubmit} className="absolute inset-x-0 bottom-0 p-6 bg-gradient-to-r from-pink-100/60 via-blue-100/60 to-green-100/60 dark:from-background dark:to-accent/10 border-t border-border flex flex-col gap-3">
         {error && <p className="text-red-500 text-sm">{error}</p>}
         <div className="flex flex-col sm:flex-row gap-2">
           <Input
