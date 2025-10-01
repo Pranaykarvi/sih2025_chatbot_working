@@ -5,7 +5,7 @@ export async function POST(req: Request) {
   const { message, patientId, topK } = await req.json()
 
   // Proxy to FastAPI backend
-  const backendRes = await fetch("http://127.0.0.1:8000/chat/ask", {
+  const backendRes = await fetch("https://sih2025-chatbot-working.onrender.com/chat/ask", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
