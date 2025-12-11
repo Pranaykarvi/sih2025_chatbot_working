@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
 
+// Force Node.js runtime for Buffer support (required for file handling)
+export const runtime = 'nodejs';
+export const maxDuration = 120; // 2 minutes for large file uploads
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
@@ -24,24 +28,59 @@ export async function POST(request: Request) {
     // Get backend URL from environment variable, fallback to default
     const backendUrl = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "http://localhost:8000";
     
+    if (!backendUrl || backendUrl === 'http://localhost:8000') {
+      console.warn('[Upload API] Backend URL not configured, using localhost fallback');
+    }
+    
     console.log(`[Upload API] Proxying to backend: ${backendUrl}/embed/pdf`);
     console.log(`[Upload API] File: ${file.name}, Size: ${file.size} bytes, Patient: ${patientId}`);
     console.log(`[Upload API] Backend URL: ${backendUrl}`);
     console.log(`[Upload API] Environment check - NEXT_PUBLIC_API_URL: ${process.env.NEXT_PUBLIC_API_URL || 'not set'}, API_URL: ${process.env.API_URL || 'not set'}`);
+    
+    // Validate backend URL format
+    try {
+      new URL(backendUrl);
+    } catch (urlError) {
+      console.error('[Upload API] Invalid backend URL:', backendUrl);
+      return NextResponse.json(
+        { 
+          error: 'Configuration error', 
+          message: 'Backend URL is not properly configured. Please set NEXT_PUBLIC_API_URL environment variable.'
+        },
+        { status: 500 }
+      );
+    }
 
-    // Convert File to Blob for serverless compatibility
-    // In Next.js serverless (Node.js), we need to convert File to Blob/Buffer
-    const fileArrayBuffer = await file.arrayBuffer();
-    const fileBlob = new Blob([fileArrayBuffer], { type: file.type || 'application/pdf' });
-
-    // Create FormData for backend - this works in both browser and Node.js
-    const backendFormData = new FormData();
-    backendFormData.append('patient_id', patientId as string);
-    // Append as Blob with filename - this is compatible with both environments
-    backendFormData.append('file', fileBlob, file.name);
+    // Convert File to Buffer for Node.js serverless environment
+    // In Vercel's serverless, we need to use Buffer for proper multipart encoding
+    const fileBuffer = Buffer.from(await file.arrayBuffer());
+    
+    // Manually construct multipart/form-data for reliable serverless compatibility
+    const boundary = `----formdata-nextjs-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+    const CRLF = '\r\n';
+    const parts: Buffer[] = [];
+    
+    // Add patient_id field
+    parts.push(Buffer.from(
+      `--${boundary}${CRLF}` +
+      `Content-Disposition: form-data; name="patient_id"${CRLF}${CRLF}` +
+      `${patientId}${CRLF}`
+    ));
+    
+    // Add file field
+    const filename = file.name || 'document.pdf';
+    const contentType = file.type || 'application/pdf';
+    parts.push(Buffer.from(
+      `--${boundary}${CRLF}` +
+      `Content-Disposition: form-data; name="file"; filename="${filename.replace(/"/g, '\\"')}"${CRLF}` +
+      `Content-Type: ${contentType}${CRLF}${CRLF}`
+    ));
+    parts.push(fileBuffer);
+    parts.push(Buffer.from(`${CRLF}--${boundary}--${CRLF}`));
+    
+    const formDataBody = Buffer.concat(parts);
 
     // Proxy to FastAPI backend with timeout
-    // Note: Don't set Content-Type header - fetch will automatically set it with the correct boundary
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for large files
     
@@ -49,9 +88,11 @@ export async function POST(request: Request) {
     try {
       backendRes = await fetch(`${backendUrl}/embed/pdf`, {
         method: 'POST',
-        body: backendFormData,
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        },
+        body: formDataBody,
         signal: controller.signal,
-        // Let fetch set Content-Type automatically with boundary
       });
       clearTimeout(timeoutId);
     } catch (fetchError: any) {

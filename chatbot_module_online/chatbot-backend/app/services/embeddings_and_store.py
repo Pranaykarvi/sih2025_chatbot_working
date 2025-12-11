@@ -105,6 +105,10 @@ def embed_file_and_store(patient_id: str, filename: str, file_bytes: bytes) -> i
                 if hasattr(res, "error") and res.error:
                     error_msg = str(res.error)
                     logger.error("Supabase insert error: %s", error_msg)
+                    # Check for common database limit/quota errors
+                    error_lower = error_msg.lower()
+                    if any(keyword in error_lower for keyword in ["quota", "limit", "exceeded", "storage", "database size"]):
+                        raise RuntimeError(f"Database storage limit reached: {error_msg}. Please contact support or upgrade your plan.")
                     raise RuntimeError(f"Failed to insert batch into Supabase: {error_msg}")
                 elif not hasattr(res, "error") and not res.data:
                     logger.error("Supabase insert returned no data")

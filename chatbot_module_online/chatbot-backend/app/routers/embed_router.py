@@ -66,12 +66,18 @@ async def embed_pdf(patient_id: str = Form(...), file: UploadFile = File(...)):
         logger.exception("Runtime error during upload: %s", error_msg)
         
         # Provide more helpful error messages
-        if "supabase" in error_msg.lower() or "connection" in error_msg.lower():
+        error_lower = error_msg.lower()
+        if "database storage limit" in error_lower or "quota" in error_lower or "limit reached" in error_lower:
+            raise HTTPException(
+                status_code=507,  # 507 Insufficient Storage
+                detail="Database storage limit reached. Please contact support or upgrade your database plan."
+            )
+        elif "supabase" in error_lower or "connection" in error_lower:
             raise HTTPException(
                 status_code=503, 
                 detail="Database connection error. Please try again in a moment."
             )
-        elif "embedding" in error_msg.lower():
+        elif "embedding" in error_lower:
             raise HTTPException(
                 status_code=500,
                 detail="Failed to generate embeddings. Please check your API keys."
