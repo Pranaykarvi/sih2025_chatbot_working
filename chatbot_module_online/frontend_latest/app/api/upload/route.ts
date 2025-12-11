@@ -26,10 +26,14 @@ export async function POST(request: Request) {
     }
 
     // Get backend URL from environment variable, fallback to default
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "http://localhost:8000";
+    // Priority: NEXT_PUBLIC_API_URL > API_URL > hardcoded Render URL > localhost
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL 
+      || process.env.API_URL 
+      || "https://sih2025-chatbot-working.onrender.com"  // Fallback to Render backend
+      || "http://localhost:8000";
     
-    if (!backendUrl || backendUrl === 'http://localhost:8000') {
-      console.warn('[Upload API] Backend URL not configured, using localhost fallback');
+    if (!process.env.NEXT_PUBLIC_API_URL && !process.env.API_URL) {
+      console.warn('[Upload API] Backend URL not configured in environment variables, using hardcoded Render URL fallback');
     }
     
     console.log(`[Upload API] Proxying to backend: ${backendUrl}/embed/pdf`);
@@ -51,47 +55,98 @@ export async function POST(request: Request) {
       );
     }
 
+    // Check file size limit (50MB for Vercel)
+    const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+    if (file.size > MAX_FILE_SIZE) {
+      return NextResponse.json(
+        { 
+          error: 'File too large', 
+          message: `File size (${(file.size / 1024 / 1024).toFixed(2)}MB) exceeds the maximum allowed size of 50MB.`
+        },
+        { status: 400 }
+      );
+    }
+
     // Convert File to Buffer for Node.js serverless environment
     // In Vercel's serverless, we need to use Buffer for proper multipart encoding
-    const fileBuffer = Buffer.from(await file.arrayBuffer());
+    let fileBuffer: Buffer;
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      fileBuffer = Buffer.from(arrayBuffer);
+    } catch (bufferError) {
+      console.error('[Upload API] Failed to read file buffer:', bufferError);
+      return NextResponse.json(
+        { 
+          error: 'File read error', 
+          message: 'Failed to read file. Please try again.'
+        },
+        { status: 500 }
+      );
+    }
     
     // Manually construct multipart/form-data for reliable serverless compatibility
     const boundary = `----formdata-nextjs-${Date.now()}-${Math.random().toString(36).substring(2)}`;
     const CRLF = '\r\n';
     const parts: Buffer[] = [];
     
-    // Add patient_id field
-    parts.push(Buffer.from(
-      `--${boundary}${CRLF}` +
-      `Content-Disposition: form-data; name="patient_id"${CRLF}${CRLF}` +
-      `${patientId}${CRLF}`
-    ));
+    try {
+      // Add patient_id field
+      parts.push(Buffer.from(
+        `--${boundary}${CRLF}` +
+        `Content-Disposition: form-data; name="patient_id"${CRLF}${CRLF}` +
+        `${String(patientId)}${CRLF}`
+      ));
+      
+      // Add file field
+      const filename = (file.name || 'document.pdf').replace(/"/g, '\\"');
+      const contentType = file.type || 'application/pdf';
+      parts.push(Buffer.from(
+        `--${boundary}${CRLF}` +
+        `Content-Disposition: form-data; name="file"; filename="${filename}"${CRLF}` +
+        `Content-Type: ${contentType}${CRLF}${CRLF}`
+      ));
+      parts.push(fileBuffer);
+      parts.push(Buffer.from(`${CRLF}--${boundary}--${CRLF}`));
+    } catch (formError) {
+      console.error('[Upload API] Failed to construct form data:', formError);
+      return NextResponse.json(
+        { 
+          error: 'Form data error', 
+          message: 'Failed to prepare file for upload. Please try again.'
+        },
+        { status: 500 }
+      );
+    }
     
-    // Add file field
-    const filename = file.name || 'document.pdf';
-    const contentType = file.type || 'application/pdf';
-    parts.push(Buffer.from(
-      `--${boundary}${CRLF}` +
-      `Content-Disposition: form-data; name="file"; filename="${filename.replace(/"/g, '\\"')}"${CRLF}` +
-      `Content-Type: ${contentType}${CRLF}${CRLF}`
-    ));
-    parts.push(fileBuffer);
-    parts.push(Buffer.from(`${CRLF}--${boundary}--${CRLF}`));
-    
-    const formDataBody = Buffer.concat(parts);
+    let formDataBody: Buffer;
+    try {
+      formDataBody = Buffer.concat(parts);
+    } catch (concatError) {
+      console.error('[Upload API] Failed to concatenate form data:', concatError);
+      return NextResponse.json(
+        { 
+          error: 'File processing error', 
+          message: 'File is too large or corrupted. Please try with a smaller file.'
+        },
+        { status: 500 }
+      );
+    }
 
-    // Proxy to FastAPI backend with timeout
+    // Proxy to FastAPI backend with timeout (110 seconds to be under maxDuration)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for large files
+    const timeoutId = setTimeout(() => controller.abort(), 110000); // 110 seconds
     
     let backendRes: Response;
     try {
+      // Convert Buffer to Uint8Array for proper TypeScript compatibility
+      const bodyArray = new Uint8Array(formDataBody);
+      
       backendRes = await fetch(`${backendUrl}/embed/pdf`, {
         method: 'POST',
         headers: {
           'Content-Type': `multipart/form-data; boundary=${boundary}`,
         },
-        body: formDataBody,
+        body: bodyArray,
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
