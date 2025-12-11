@@ -132,19 +132,38 @@ export default function ChatPanel() {
   }
 
   return (
-    <div className="w-full h-[70vh] relative rounded-2xl shadow-2xl bg-gradient-to-br from-white via-blue-100 to-pink-100 dark:from-background dark:via-accent/30 dark:to-primary/20 border border-border overflow-hidden">
-      <header className="px-6 py-4 border-b border-border flex items-center gap-2 bg-gradient-to-r from-pink-200/60 via-blue-200/60 to-green-200/60 dark:from-accent/30 dark:to-primary/10">
-        <span className="text-2xl font-bold text-accent">ArogyaLink Chatbot</span>
-        <span className="ml-auto text-xs text-muted-foreground">Ask a medical question based on uploaded records.</span>
+    <div className="w-full h-[85vh] relative rounded-3xl shadow-2xl bg-gradient-to-br from-purple-50 via-pink-50 via-blue-50 to-cyan-50 dark:from-purple-950/20 dark:via-pink-950/20 dark:via-blue-950/20 dark:to-cyan-950/20 border-2 border-purple-200/50 dark:border-purple-800/50 overflow-hidden perspective-3d animate-pulse-glow">
+      {/* Animated 3D background elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-10 left-10 w-72 h-72 bg-purple-400/20 rounded-full blur-3xl animate-float"></div>
+        <div className="absolute bottom-20 right-20 w-96 h-96 bg-pink-400/20 rounded-full blur-3xl animate-float-reverse"></div>
+        <div className="absolute top-1/2 left-1/2 w-80 h-80 bg-blue-400/20 rounded-full blur-3xl animate-rotate-3d"></div>
+      </div>
+      
+      <header className="relative px-6 py-5 border-b-2 border-purple-200/50 dark:border-purple-800/50 flex items-center gap-2 bg-gradient-to-r from-purple-500/80 via-pink-500/80 via-blue-500/80 to-cyan-500/80 dark:from-purple-600/60 dark:via-pink-600/60 dark:via-blue-600/60 dark:to-cyan-600/60 backdrop-blur-sm shadow-lg">
+        <span className="text-3xl font-extrabold bg-gradient-to-r from-white via-yellow-200 to-white bg-clip-text text-transparent animate-gradient-shift">
+          ✨ ArogyaLink Chatbot ✨
+        </span>
+        <span className="ml-auto text-xs font-semibold text-white/90 bg-white/20 px-3 py-1 rounded-full backdrop-blur-sm">
+          Ask a medical question based on uploaded records.
+        </span>
       </header>
       {/* Message list is scrollable, input bar is absolutely fixed at bottom */}
-      <div className="absolute inset-x-0 top-[72px] bottom-[96px] overflow-y-auto px-6 py-4" ref={listRef} role="list" aria-live="polite">
+      <div className="absolute inset-x-0 top-[88px] bottom-[120px] overflow-y-auto px-6 py-6 scroll-smooth" ref={listRef} role="list" aria-live="polite">
         {messages.length === 0 ? (
-          <p className="text-sm text-muted-foreground mt-10 text-center">Your conversation will appear here.</p>
+          <div className="flex flex-col items-center justify-center h-full">
+            <div className="text-center space-y-4 animate-slide-in-up">
+              <div className="text-6xl animate-bounce">💬</div>
+              <p className="text-lg font-semibold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 bg-clip-text text-transparent">
+                Your conversation will appear here
+              </p>
+              <p className="text-sm text-muted-foreground">Start chatting to see messages appear with beautiful animations!</p>
+            </div>
+          </div>
         ) : (
-          <div className="flex flex-col gap-3">
-            {messages.map((m) => (
-              <div key={m.id} className="space-y-2">
+          <div className="flex flex-col gap-4">
+            {messages.map((m, index) => (
+              <div key={m.id} className="space-y-2 scroll-reveal" style={{ animationDelay: `${index * 0.1}s` }}>
                 <ChatBubble role={m.role}>{m.text}</ChatBubble>
                 {m.role === "assistant" && m.sources && m.sources.length > 0 && (
                   <Accordion type="single" collapsible className="max-w-[85%]">
@@ -170,10 +189,13 @@ export default function ChatPanel() {
           </div>
         )}
         {loading && (
-          <div className="mt-3 flex gap-1 pl-1">
-            <span className="h-2 w-2 animate-bounce rounded-full bg-pink-400 [animation-delay:-0.2s]" />
-            <span className="h-2 w-2 animate-bounce rounded-full bg-blue-400 [animation-delay:-0.1s]" />
-            <span className="h-2 w-2 animate-bounce rounded-full bg-green-400" />
+          <div className="mt-4 flex gap-2 pl-1 items-center animate-slide-in-up">
+            <span className="h-3 w-3 animate-bounce rounded-full bg-gradient-to-r from-purple-500 to-pink-500 shadow-lg [animation-delay:-0.2s]" />
+            <span className="h-3 w-3 animate-bounce rounded-full bg-gradient-to-r from-pink-500 to-blue-500 shadow-lg [animation-delay:-0.1s]" />
+            <span className="h-3 w-3 animate-bounce rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 shadow-lg" />
+            <span className="ml-2 text-sm font-medium bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 bg-clip-text text-transparent">
+              AI is thinking...
+            </span>
             <span className="sr-only">Assistant is typing</span>
           </div>
         )}
@@ -181,31 +203,35 @@ export default function ChatPanel() {
         <div ref={inputBarRef} />
       </div>
       {/* Input bar absolutely fixed at bottom */}
-      <form onSubmit={onSubmit} className="absolute inset-x-0 bottom-0 p-6 bg-gradient-to-r from-pink-100/60 via-blue-100/60 to-green-100/60 dark:from-background dark:to-accent/10 border-t border-border flex flex-col gap-3">
-        {error && <p className="text-red-500 text-sm">{error}</p>}
-        <div className="flex flex-col sm:flex-row gap-2">
+      <form onSubmit={onSubmit} className="absolute inset-x-0 bottom-0 p-6 bg-gradient-to-r from-purple-500/90 via-pink-500/90 via-blue-500/90 to-cyan-500/90 dark:from-purple-600/80 dark:via-pink-600/80 dark:via-blue-600/80 dark:to-cyan-600/80 backdrop-blur-md border-t-2 border-purple-300/50 dark:border-purple-700/50 shadow-2xl flex flex-col gap-3">
+        {error && (
+          <div className="bg-red-500/20 border-2 border-red-500/50 rounded-lg px-4 py-2 animate-slide-in-up">
+            <p className="text-red-700 dark:text-red-300 text-sm font-semibold">⚠️ {error}</p>
+          </div>
+        )}
+        <div className="flex flex-col sm:flex-row gap-3">
           <Input
             id="chat_patient_id"
-            className="flex-1"
+            className="flex-1 bg-white/90 dark:bg-gray-900/90 border-2 border-purple-300/50 dark:border-purple-700/50 rounded-xl px-4 py-3 font-medium shadow-lg hover:shadow-xl hover:border-purple-400 dark:hover:border-purple-600 transition-all duration-300 focus:ring-2 focus:ring-purple-500 focus:scale-105 click-bounce"
             placeholder="Patient ID (e.g., RURAL-12345)"
             value={patientId}
             onChange={(e) => setPatientId(e.target.value)}
           />
           <Input
             id="message"
-            className="flex-1"
+            className="flex-1 bg-white/90 dark:bg-gray-900/90 border-2 border-purple-300/50 dark:border-purple-700/50 rounded-xl px-4 py-3 font-medium shadow-lg hover:shadow-xl hover:border-purple-400 dark:hover:border-purple-600 transition-all duration-300 focus:ring-2 focus:ring-purple-500 focus:scale-105 click-bounce"
             placeholder="Ask a medical question…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             autoFocus
           />
           <Select value={topK} onValueChange={setTopK}>
-            <SelectTrigger className="w-20">
+            <SelectTrigger className="w-24 bg-white/90 dark:bg-gray-900/90 border-2 border-purple-300/50 dark:border-purple-700/50 rounded-xl shadow-lg hover:shadow-xl hover:border-purple-400 dark:hover:border-purple-600 transition-all duration-300 click-bounce">
               <SelectValue placeholder="3" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-2 border-purple-300/50">
               {[1, 2, 3, 4, 5].map((k) => (
-                <SelectItem key={k} value={String(k)}>
+                <SelectItem key={k} value={String(k)} className="hover:bg-purple-100 dark:hover:bg-purple-900/50">
                   {k}
                 </SelectItem>
               ))}
@@ -213,10 +239,20 @@ export default function ChatPanel() {
           </Select>
           <Button
             type="submit"
-            className="bg-gradient-to-r from-pink-500 via-blue-500 to-green-500 text-white font-bold shadow-lg hover:scale-105 focus:ring-2 focus:ring-pink-400 focus:ring-offset-2 px-8 py-2 transition-all duration-300"
+            className="bg-gradient-to-r from-purple-600 via-pink-600 via-blue-600 to-cyan-600 hover:from-purple-700 hover:via-pink-700 hover:via-blue-700 hover:to-cyan-700 text-white font-bold shadow-2xl hover:shadow-purple-500/50 hover:scale-110 focus:ring-4 focus:ring-purple-400 focus:ring-offset-2 px-8 py-3 rounded-xl transition-all duration-300 transform hover:-translate-y-1 click-bounce animate-gradient-shift"
             disabled={loading}
           >
-            {loading ? "Sending…" : "Send"}
+            {loading ? (
+              <span className="flex items-center gap-2">
+                <span className="animate-spin">⚡</span>
+                Sending…
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <span>🚀</span>
+                Send
+              </span>
+            )}
           </Button>
         </div>
       </form>

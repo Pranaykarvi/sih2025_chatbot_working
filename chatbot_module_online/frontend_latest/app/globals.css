@@ -132,3 +132,142 @@
     color: var(--foreground);
   }
 }
+
+@layer utilities {
+  /* 3D Transform Animations */
+  @keyframes float {
+    0%, 100% { transform: translateY(0px) rotateX(0deg); }
+    50% { transform: translateY(-20px) rotateX(5deg); }
+  }
+  
+  @keyframes float-reverse {
+    0%, 100% { transform: translateY(0px) rotateX(0deg); }
+    50% { transform: translateY(20px) rotateX(-5deg); }
+  }
+  
+  @keyframes pulse-glow {
+    0%, 100% { 
+      box-shadow: 0 0 20px rgba(139, 92, 246, 0.3),
+                  0 0 40px rgba(59, 130, 246, 0.2),
+                  0 0 60px rgba(236, 72, 153, 0.1);
+    }
+    50% { 
+      box-shadow: 0 0 30px rgba(139, 92, 246, 0.5),
+                  0 0 60px rgba(59, 130, 246, 0.4),
+                  0 0 90px rgba(236, 72, 153, 0.3);
+    }
+  }
+  
+  @keyframes gradient-shift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  
+  @keyframes slide-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(30px) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  
+  @keyframes scale-bounce {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+  }
+  
+  @keyframes rotate-3d {
+    0% { transform: perspective(1000px) rotateY(0deg) rotateX(0deg); }
+    25% { transform: perspective(1000px) rotateY(5deg) rotateX(2deg); }
+    50% { transform: perspective(1000px) rotateY(0deg) rotateX(0deg); }
+    75% { transform: perspective(1000px) rotateY(-5deg) rotateX(-2deg); }
+    100% { transform: perspective(1000px) rotateY(0deg) rotateX(0deg); }
+  }
+  
+  @keyframes shimmer {
+    0% { background-position: -1000px 0; }
+    100% { background-position: 1000px 0; }
+  }
+  
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+  
+  .animate-float-reverse {
+    animation: float-reverse 8s ease-in-out infinite;
+  }
+  
+  .animate-pulse-glow {
+    animation: pulse-glow 3s ease-in-out infinite;
+  }
+  
+  .animate-gradient-shift {
+    background-size: 200% 200%;
+    animation: gradient-shift 8s ease infinite;
+  }
+  
+  .animate-slide-in-up {
+    animation: slide-in-up 0.5s ease-out;
+  }
+  
+  .animate-scale-bounce {
+    animation: scale-bounce 0.3s ease-in-out;
+  }
+  
+  .animate-rotate-3d {
+    animation: rotate-3d 20s linear infinite;
+  }
+  
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.3),
+      transparent
+    );
+    background-size: 1000px 100%;
+    animation: shimmer 2s infinite;
+  }
+  
+  .perspective-3d {
+    perspective: 1000px;
+    transform-style: preserve-3d;
+  }
+  
+  .transform-3d {
+    transform-style: preserve-3d;
+  }
+  
+  .hover-lift {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .hover-lift:hover {
+    transform: translateY(-8px) scale(1.02);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  }
+  
+  .click-bounce:active {
+    animation: scale-bounce 0.2s ease-in-out;
+  }
+  
+  /* Scroll reveal animation */
+  @keyframes fade-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(40px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  .scroll-reveal {
+    animation: fade-in-up 0.8s ease-out;
+  }
+}

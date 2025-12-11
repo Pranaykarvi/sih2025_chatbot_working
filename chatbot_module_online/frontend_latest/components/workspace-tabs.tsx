@@ -35,25 +35,25 @@ export default function WorkspaceTabs() {
   }, [value])
 
   return (
-    <div className="relative min-h-[70vh] flex flex-col items-center justify-center">
+    <div className="relative min-h-[85vh] flex flex-col items-center justify-center perspective-3d">
       <AnimatedBg />
-      <Tabs value={value} onValueChange={(v) => setValue(v as "upload" | "chat")} className="w-full max-w-3xl z-10">
-        <div className="flex items-center justify-between gap-4 mb-2">
-          <h1 className="text-pretty text-2xl font-semibold text-primary transition-colors">
-            ArogyaLink Patient Workspace
+      <Tabs value={value} onValueChange={(v) => setValue(v as "upload" | "chat")} className="w-full max-w-6xl z-10">
+        <div className="flex items-center justify-between gap-4 mb-6 animate-slide-in-up">
+          <h1 className="text-pretty text-4xl font-extrabold bg-gradient-to-r from-purple-600 via-pink-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent animate-gradient-shift">
+            🏥 ArogyaLink Patient Workspace
           </h1>
-          <TabsList className="transition-colors">
+          <TabsList className="transition-all duration-300 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-2 border-purple-300/50 dark:border-purple-700/50 rounded-xl p-1 shadow-xl">
             <TabsTrigger
               value="upload"
-              className="transition-all duration-300 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+              className="transition-all duration-300 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:via-pink-600 data-[state=active]:to-blue-600 data-[state=active]:text-white rounded-lg px-6 py-2 font-bold hover:scale-105 click-bounce data-[state=active]:shadow-lg"
             >
-              Upload
+              📁 Upload
             </TabsTrigger>
             <TabsTrigger
               value="chat"
-              className="transition-all duration-300 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground"
+              className="transition-all duration-300 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-600 data-[state=active]:via-cyan-600 data-[state=active]:to-purple-600 data-[state=active]:text-white rounded-lg px-6 py-2 font-bold hover:scale-105 click-bounce data-[state=active]:shadow-lg"
             >
-              Chat Assistant
+              💬 Chat Assistant
             </TabsTrigger>
           </TabsList>
         </div>
