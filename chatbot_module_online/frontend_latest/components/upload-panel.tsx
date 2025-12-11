@@ -46,31 +46,68 @@ export default function UploadPanel() {
     if (!patientId || pendingFiles.length === 0) return;
 
     setUploading(true);
+    const uploadedFiles: Uploaded[] = [];
+    const errors: string[] = [];
+
     try {
-      for (const file of pendingFiles) {
-        const formData = new FormData();
-        formData.append("patient_id", patientId);
-        formData.append("file", file);
+      for (let i = 0; i < pendingFiles.length; i++) {
+        const file = pendingFiles[i];
+        
+        try {
+          const formData = new FormData();
+          formData.append("patientId", patientId);
+          formData.append("file", file);
 
-        const res = await fetch("http://127.0.0.1:8000/embed/pdf", {
-          method: "POST",
-          body: formData,
-        });
+          // Use Next.js API route which proxies to backend
+          const res = await fetch("/api/upload", {
+            method: "POST",
+            body: formData,
+          });
 
-        if (!res.ok) throw new Error("Upload failed for " + file.name);
+          if (!res.ok) {
+            const errorData = await res.json().catch(() => ({ 
+              error: "Unknown error", 
+              message: `Upload failed for ${file.name}` 
+            }));
+            const errorMsg = errorData.message || errorData.error || `Upload failed for ${file.name}`;
+            errors.push(`${file.name}: ${errorMsg}`);
+            continue;
+          }
 
-        const data = await res.json();
+          const data = await res.json();
+          uploadedFiles.push({
+            name: data.name || file.name,
+            size: data.size || file.size,
+            lastModified: data.lastModified || file.lastModified,
+          });
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : `Upload failed for ${file.name}`;
+          errors.push(`${file.name}: ${errorMsg}`);
+          console.error(`Error uploading ${file.name}:`, err);
+        }
+      }
+
+      // Update uploaded files state
+      if (uploadedFiles.length > 0) {
         setUploaded((prev) => {
           const existing = prev[patientId] ?? [];
-          return { ...prev, [patientId]: [...existing, { ...file, size: file.size, lastModified: file.lastModified }] };
+          return { ...prev, [patientId]: [...existing, ...uploadedFiles] };
         });
       }
 
-      setPendingFiles([]);
-      alert("Upload successful!");
+      // Show results
+      if (errors.length === 0 && uploadedFiles.length > 0) {
+        alert(`Successfully uploaded ${uploadedFiles.length} file(s)!`);
+        setPendingFiles([]);
+      } else if (errors.length > 0 && uploadedFiles.length === 0) {
+        alert(`All uploads failed:\n${errors.join('\n')}`);
+      } else if (errors.length > 0) {
+        alert(`${uploadedFiles.length} file(s) uploaded successfully.\n${errors.length} file(s) failed:\n${errors.join('\n')}`);
+        setPendingFiles([]);
+      }
     } catch (err) {
-      console.error(err);
-      alert("Upload failed. See console for details.");
+      console.error("Upload process error:", err);
+      alert(err instanceof Error ? err.message : "Upload failed. See console for details.");
     } finally {
       setUploading(false);
     }

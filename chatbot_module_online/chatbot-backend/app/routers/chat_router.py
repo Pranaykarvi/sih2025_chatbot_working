@@ -5,6 +5,7 @@ from app.services.embeddings import embed_texts
 from app.db.supabase_client import supabase
 from app.services.llm_providers import generate_text
 import logging
+import time
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -41,16 +42,58 @@ async def ask(req: ChatRequest):
         logger.exception("Query embedding failed")
         raise HTTPException(status_code=500, detail="Failed to embed query")
 
-    # 3️⃣ Fetch patient-specific document chunks
-    try:
-        rpc = supabase.rpc("match_patient_documents", {
-            "query_embedding": q_emb,
-            "match_count": top_k,
-            "patientid": req.patient_id
-        }).execute()
-    except Exception:
-        logger.exception("Supabase RPC failed")
-        raise HTTPException(status_code=500, detail="Patient document search failed")
+    # 3️⃣ Fetch patient-specific document chunks with retry logic
+    max_retries = 3
+    retry_delay = 1
+    rpc = None
+    last_exception = None
+    
+    for attempt in range(max_retries):
+        try:
+            logger.info("Fetching patient documents (attempt %d/%d) for patient_id=%s", 
+                       attempt + 1, max_retries, req.patient_id)
+            rpc = supabase.rpc("match_patient_documents", {
+                "query_embedding": q_emb,
+                "match_count": top_k,
+                "patientid": req.patient_id
+            }).execute()
+            logger.info("Successfully fetched patient documents")
+            break  # Success - exit retry loop
+        except Exception as e:
+            last_exception = e
+            error_str = str(e).lower()
+            is_retryable = any(keyword in error_str for keyword in [
+                "name or service not known",
+                "connection",
+                "timeout",
+                "network",
+                "dns",
+                "temporary failure"
+            ])
+            
+            if attempt < max_retries - 1 and is_retryable:
+                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                logger.warning("Supabase RPC failed (attempt %d/%d): %s. Retrying in %ds...", 
+                             attempt + 1, max_retries, str(e), wait_time)
+                time.sleep(wait_time)
+            else:
+                logger.exception("Supabase RPC failed (non-retryable or max retries reached)")
+                if is_retryable:
+                    raise HTTPException(
+                        status_code=503, 
+                        detail="Database connection error. Please try again in a moment."
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=500, 
+                        detail=f"Patient document search failed: {str(e)}"
+                    )
+    
+    if rpc is None:
+        raise HTTPException(
+            status_code=500, 
+            detail="Failed to fetch patient documents after multiple attempts"
+        )
 
     rows = rpc.data or []
     context_text = "\n\n".join([r.get("text", "") for r in rows])

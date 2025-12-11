@@ -2,6 +2,7 @@
 import tempfile
 import os
 import logging
+import time
 from PyPDF2 import PdfReader
 from docx import Document
 from app.utils.text_splitter import chunk_text
@@ -83,22 +84,64 @@ def embed_file_and_store(patient_id: str, filename: str, file_bytes: bytes) -> i
         for i, (chunk, emb) in enumerate(zip(chunks, embeddings))
     ]
 
-    # 5. Insert in batches
+    # 5. Insert in batches with retry logic
     BATCH = 100
+    max_retries = 3
+    retry_delay = 1  # seconds
+    
     for i in range(0, len(rows), BATCH):
         batch = rows[i:i + BATCH]
-        try:
-            res = supabase.table("patient_documents").insert(batch).execute()
-            # Handle both old and new response formats
-            if hasattr(res, "error") and res.error:
-                logger.error("Supabase insert error: %s", res.error)
-                raise RuntimeError("Failed to insert batch into Supabase")
-            elif not hasattr(res, "error") and not res.data:
-                logger.error("Supabase insert returned no data")
-                raise RuntimeError("Failed to insert batch into Supabase")
-        except Exception as e:
-            logger.exception("Supabase insert exception")
-            raise RuntimeError("Supabase insert failed") from e
+        retry_count = 0
+        last_exception = None
+        
+        while retry_count < max_retries:
+            try:
+                logger.info("Inserting batch %d/%d (attempt %d/%d)", 
+                           i // BATCH + 1, (len(rows) + BATCH - 1) // BATCH, 
+                           retry_count + 1, max_retries)
+                res = supabase.table("patient_documents").insert(batch).execute()
+                
+                # Handle both old and new response formats
+                if hasattr(res, "error") and res.error:
+                    error_msg = str(res.error)
+                    logger.error("Supabase insert error: %s", error_msg)
+                    raise RuntimeError(f"Failed to insert batch into Supabase: {error_msg}")
+                elif not hasattr(res, "error") and not res.data:
+                    logger.error("Supabase insert returned no data")
+                    raise RuntimeError("Failed to insert batch into Supabase: no data returned")
+                
+                # Success - break out of retry loop
+                logger.info("Successfully inserted batch %d/%d", i // BATCH + 1, (len(rows) + BATCH - 1) // BATCH)
+                break
+                
+            except Exception as e:
+                last_exception = e
+                retry_count += 1
+                
+                # Check if it's a connection error that might be retryable
+                error_str = str(e).lower()
+                is_retryable = any(keyword in error_str for keyword in [
+                    "name or service not known",
+                    "connection",
+                    "timeout",
+                    "network",
+                    "dns",
+                    "temporary failure"
+                ])
+                
+                if retry_count < max_retries and is_retryable:
+                    wait_time = retry_delay * (2 ** (retry_count - 1))  # Exponential backoff
+                    logger.warning("Supabase insert failed (attempt %d/%d): %s. Retrying in %ds...", 
+                                 retry_count, max_retries, str(e), wait_time)
+                    time.sleep(wait_time)
+                else:
+                    logger.exception("Supabase insert exception (non-retryable or max retries reached)")
+                    raise RuntimeError(f"Supabase insert failed after {retry_count} attempts: {str(e)}") from e
+        
+        # If we exhausted retries, raise the last exception
+        if retry_count >= max_retries and last_exception:
+            raise RuntimeError(f"Supabase insert failed after {max_retries} attempts") from last_exception
 
+    logger.info("Successfully inserted all %d chunks for file: %s", len(rows), filename)
     return len(rows)
 

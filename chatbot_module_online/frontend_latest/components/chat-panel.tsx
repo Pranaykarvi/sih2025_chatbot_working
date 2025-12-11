@@ -89,24 +89,41 @@ export default function ChatPanel() {
         }),
       })
 
-      if (!res.ok) throw new Error(`Server error: ${res.status}`)
-
       const data = await res.json()
+
+      if (!res.ok) {
+        // Handle API errors with better messages
+        const errorMessage = data.error || data.message || `Server error: ${res.status}`
+        throw new Error(errorMessage)
+      }
+
+      // Check if response has the expected structure
+      if (!data.text && !data.answer) {
+        throw new Error("Invalid response format from server")
+      }
+
       const aiMsg: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        text: data.text ?? "I could not generate a response.",
+        text: data.text || data.answer || "I could not generate a response.",
         sources: data.sources ?? [],
       }
       setMessages((prev) => [...prev, aiMsg])
     } catch (err) {
-      console.error(err)
+      console.error("Chat error:", err)
+      const errorMessage = err instanceof Error 
+        ? err.message 
+        : "There was an error generating a response. Please try again."
+      
       const aiMsg: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        text: "There was an error generating a response. Please try again.",
+        text: errorMessage.includes("Backend error") || errorMessage.includes("Cannot POST")
+          ? "Unable to connect to the backend server. Please ensure the backend is running on port 8000."
+          : errorMessage,
       }
       setMessages((prev) => [...prev, aiMsg])
+      setError(errorMessage)
     } finally {
       setLoading(false)
       // Scroll to input bar after assistant message

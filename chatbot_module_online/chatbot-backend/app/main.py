@@ -1,7 +1,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import embed_router, chat_router
+from app.routers import embed_router, chat_router, sync_router
 import app.logging_config
 from dotenv import load_dotenv
 import os
@@ -19,6 +19,7 @@ app.add_middleware(
 
 app.include_router(embed_router.router)
 app.include_router(chat_router.router)
+app.include_router(sync_router.router)
 
 @app.get("/health")
 async def health():

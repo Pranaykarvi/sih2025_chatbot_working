@@ -2,6 +2,24 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+### Environment Setup
+
+Create a `.env.local` file in the `frontend_latest` directory:
+
+```env
+# Backend API URL (supports both client and server-side)
+NEXT_PUBLIC_API_URL=http://localhost:8000
+# OR for production:
+# NEXT_PUBLIC_API_URL=https://sih2025-chatbot-working.onrender.com
+
+# Alternative server-only variable (used if NEXT_PUBLIC_API_URL not set)
+API_URL=http://localhost:8000
+```
+
+**Note:** If no environment variable is set, the app will default to `http://localhost:8000` for local development.
+
+### Running the Development Server
+
 First, run the development server:
 
 ```bash
