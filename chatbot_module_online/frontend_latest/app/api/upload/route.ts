@@ -26,19 +26,55 @@ export async function POST(request: Request) {
     
     console.log(`[Upload API] Proxying to backend: ${backendUrl}/embed/pdf`);
     console.log(`[Upload API] File: ${file.name}, Size: ${file.size} bytes, Patient: ${patientId}`);
+    console.log(`[Upload API] Backend URL: ${backendUrl}`);
+    console.log(`[Upload API] Environment check - NEXT_PUBLIC_API_URL: ${process.env.NEXT_PUBLIC_API_URL || 'not set'}, API_URL: ${process.env.API_URL || 'not set'}`);
 
-    // Create new FormData for backend
+    // Convert File to Blob for serverless compatibility
+    // In Next.js serverless (Node.js), we need to convert File to Blob/Buffer
+    const fileArrayBuffer = await file.arrayBuffer();
+    const fileBlob = new Blob([fileArrayBuffer], { type: file.type || 'application/pdf' });
+
+    // Create FormData for backend - this works in both browser and Node.js
     const backendFormData = new FormData();
     backendFormData.append('patient_id', patientId as string);
-    backendFormData.append('file', file);
+    // Append as Blob with filename - this is compatible with both environments
+    backendFormData.append('file', fileBlob, file.name);
 
-    // Proxy to FastAPI backend
-    // Note: Don't set Content-Type header - browser will set it with boundary for FormData
-    const backendRes = await fetch(`${backendUrl}/embed/pdf`, {
-      method: 'POST',
-      body: backendFormData,
-      // Explicitly don't set Content-Type - let browser set it with multipart/form-data boundary
-    });
+    // Proxy to FastAPI backend with timeout
+    // Note: Don't set Content-Type header - fetch will automatically set it with the correct boundary
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for large files
+    
+    let backendRes: Response;
+    try {
+      backendRes = await fetch(`${backendUrl}/embed/pdf`, {
+        method: 'POST',
+        body: backendFormData,
+        signal: controller.signal,
+        // Let fetch set Content-Type automatically with boundary
+      });
+      clearTimeout(timeoutId);
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      if (fetchError.name === 'AbortError') {
+        console.error('[Upload API] Request timeout');
+        return NextResponse.json(
+          { 
+            error: 'Upload timeout', 
+            message: 'The upload took too long. Please try with a smaller file or check your connection.'
+          },
+          { status: 504 }
+        );
+      }
+      console.error('[Upload API] Fetch error:', fetchError);
+      return NextResponse.json(
+        { 
+          error: 'Network error', 
+          message: fetchError.message || 'Failed to connect to backend server. Please check if the backend is running.'
+        },
+        { status: 503 }
+      );
+    }
 
     if (!backendRes.ok) {
       // Try to parse error as JSON first, fallback to text
