@@ -1,5 +1,71 @@
 # SIH 2025 — ArogyaLink Medical RAG Chatbot
 
+---
+
+## In plain English
+
+### What is this?
+
+**ArogyaLink** is a smart assistant that answers questions **based on medical documents you (or your team) upload**—for example lab reports, discharge summaries, or notes saved as PDF files. It is **not** a replacement for a doctor or a diagnosis; it helps people **find and understand information that is already in those files**.
+
+In technical terms, it is a **patient-scoped** system: each **Patient ID** acts like a separate folder. Documents uploaded under one ID are only used when someone asks questions for **that same ID**. That way, one person’s papers are not mixed with another’s.
+
+### How does it work, step by step?
+
+1. **You open the website** (the part you see in the browser—colors, buttons, chat box).
+2. **You enter a Patient ID** so the system knows which “folder” of documents to use.
+3. **You upload PDFs** (reports, etc.). The system reads the text, splits it into small pieces, and **remembers** them in a secure database (**Supabase**), in a form that allows **semantic search** (finding passages that *mean* something similar to your question, not only exact words).
+4. **You type a question** in chat. The system finds the most relevant pieces from *that patient’s* uploads, then uses **AI models** (Google **Gemini** first, with **Groq** as a backup) to write an answer **grounded in those passages**, with references where possible.
+
+So: **your files → stored and indexed per patient → questions pull from those files → the AI explains in natural language.**
+
+### Where does it run when it is “on the internet”?
+
+Think of three cooperating pieces:
+
+| In simple terms | What it is | Typical hosting |
+|-----------------|------------|-----------------|
+| **The screen you click** | The website / chat and upload pages | **Vercel** (hosts the user-facing app) |
+| **The engine in the middle** | The service that reads PDFs, talks to the database, and calls the AI | **Render** (hosts the backend API) |
+| **The filing cabinet** | Database that stores text chunks and “meaning” vectors for search | **Supabase** |
+
+You still need **API keys** (passwords for external AI and embedding services) set up by whoever deploys the project—those are not visible to end users.
+
+### Who should read which part of this document?
+
+- **If you are not technical:** read **this plain-English section** and the short **“Running it on your computer (simple checklist)”** below. For anything that mentions commands, Python, or environment variables, you can share this README with a developer or IT person.
+- **If you are building or hosting the app:** continue from **Technical documentation** onward for architecture, file layout, environment variables, and API details.
+
+### Quick glossary (words you will see later)
+
+| Term | Simple meaning |
+|------|----------------|
+| **RAG** | The system **retrieves** relevant lines from your uploaded files, then **generates** an answer based on them (not only from generic internet knowledge). |
+| **Backend / API** | The “behind the scenes” service the website calls to upload files, search the database, and talk to AI. |
+| **Frontend** | What you see in the browser: pages, chat, upload buttons. |
+| **Supabase** | Cloud database used here to store text chunks and searchable “meaning” data (**vectors**). |
+| **Embedding / vector** | A mathematical fingerprint of text so the system can find passages **similar in meaning** to a question. |
+| **Patient ID** | A text label that **groups** one person’s documents; searches use only that group’s data. |
+| **Vercel / Render** | Hosting companies: Vercel for the **site**, Render for the **backend** in the usual setup described here. |
+
+---
+
+## Running it on your computer (simple checklist)
+
+You need a **developer setup** (this is not a single “Install” button like a phone app). At a high level:
+
+1. **Install tools** on the computer: **Python** (for the engine), **Node.js** (for the website), and optionally **Docker** if you run the engine in a container.
+2. **Create accounts and keys** (a technical person usually does this): Supabase project, and API access for the AI/embedding providers listed in the technical section.
+3. **Start the engine** (backend) so it listens on a port (e.g. `8000`).
+4. **Start the website** (frontend) so it opens in the browser (e.g. `3000`), and point it at that engine using a small config file (`.env.local`).
+5. Open the local address in the browser, enter a Patient ID, upload PDFs, then chat.
+
+Exact copy-paste commands for Windows and folder names are in **Run locally** under [Technical documentation](#technical-documentation) below.
+
+---
+
+## Technical documentation
+
 Patient-scoped **retrieval-augmented generation (RAG)** chatbot for health-related documents. Users upload PDFs (per patient ID), text is chunked and embedded into **Supabase** (`pgvector`), and questions are answered using **Gemini** and **Groq** with context from the patient’s own chunks.
 
 The repository is organized around:
@@ -10,6 +76,8 @@ The repository is organized around:
 ---
 
 ## Architecture
+
+If you prefer words over diagrams: the **website** sends uploads and questions to a **backend service**. That service **stores and searches** document text in **Supabase**, and asks **external AI services** (embeddings + chat models) to turn the best-matching snippets into an answer. The diagram below shows the same thing with components and paths.
 
 ```mermaid
 flowchart TB
@@ -77,6 +145,8 @@ flowchart TB
 
 ## Repository layout
 
+**Plain English:** The project is split into folders: one main **“engine”** (Python backend), one main **“website”** (`frontend_latest`), and some older or experimental UIs. The table lists what each folder is for.
+
 | Path | Role |
 |------|------|
 | `chatbot_module_online/chatbot-backend/` | **FastAPI** service: embed, chat, sync, health. |
@@ -123,6 +193,8 @@ Backend source highlights:
 ---
 
 ## Environment variables
+
+**Plain English:** These are **secret settings** (like API keys and database addresses) that the programs read when they start. They are kept in `.env` files on a machine or in the **environment variables** section of Vercel/Render—not committed to GitHub.
 
 ### Backend (`chatbot_module_online/chatbot-backend/.env` or Docker `env_file`)
 
@@ -215,6 +287,8 @@ Backend listens on **8000**. Run the Next.js app separately if you need the full
 ---
 
 ## Deployment (Vercel + Render + Supabase)
+
+**Non-technical summary:** The **website** is deployed to **Vercel**. The **backend** (the service that processes files and talks to the database and AI) is deployed to **Render** (or similar). **Supabase** is the cloud database where document chunks and search vectors live. Someone with access must configure passwords/keys on each platform—never share those in public.
 
 | Layer | Platform | Notes |
 |-------|----------|--------|
