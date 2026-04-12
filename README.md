@@ -1,9 +1,6 @@
 # SIH 2025 — ArogyaLink Medical RAG Chatbot
 
 ---
-
-## In plain English
-
 ### What is this?
 
 **ArogyaLink** is a smart assistant that answers questions **based on medical documents you (or your team) upload**—for example lab reports, discharge summaries, or notes saved as PDF files. It is **not** a replacement for a doctor or a diagnosis; it helps people **find and understand information that is already in those files**.
