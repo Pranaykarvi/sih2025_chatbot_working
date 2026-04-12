@@ -13,9 +13,8 @@ if ($portInUse) {
     Start-Sleep -Seconds 2
 }
 
-# Change to chatbot-backend directory
-$backendDir = Split-Path -Parent $PSScriptRoot
-$backendDir = Join-Path $backendDir "chatbot-backend"
+# Change to chatbot-backend directory (same folder as this script's parent)
+$backendDir = Join-Path $PSScriptRoot "chatbot-backend"
 Set-Location $backendDir
 
 Write-Host "Backend directory: $backendDir" -ForegroundColor Cyan
