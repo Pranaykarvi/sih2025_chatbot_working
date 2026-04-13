@@ -8,12 +8,13 @@ import { Label } from "@/components/ui/label"
 import ChatBubble from "./chat-bubble"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { askQuestion } from "@/lib/api"
 
 type Message = {
   id: string
   role: "user" | "assistant"
   text: string
-  sources?: Array<{ pdf: string; chunkId: string; score: number }>
+  sources?: Array<{ pdf: string; chunkId: string | number; score: number }>
 }
 
 // Animated background SVG (brighter, more colorful)
@@ -79,34 +80,17 @@ export default function ChatPanel() {
     scrollToInputBar()
 
     try {
-      const res = await fetch("/api/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMsg.text,
-          patientId,
-          topK: Number(topK),
-        }),
+      const data = await askQuestion({
+        patientId: patientId.trim(),
+        message: userMsg.text,
+        topK: Number(topK),
       })
-
-      const data = await res.json()
-
-      if (!res.ok) {
-        // Handle API errors with better messages
-        const errorMessage = data.error || data.message || `Server error: ${res.status}`
-        throw new Error(errorMessage)
-      }
-
-      // Check if response has the expected structure
-      if (!data.text && !data.answer) {
-        throw new Error("Invalid response format from server")
-      }
 
       const aiMsg: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        text: data.text || data.answer || "I could not generate a response.",
-        sources: data.sources ?? [],
+        text: data.text,
+        sources: data.sources,
       }
       setMessages((prev) => [...prev, aiMsg])
     } catch (err) {
@@ -118,9 +102,7 @@ export default function ChatPanel() {
       const aiMsg: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        text: errorMessage.includes("Backend error") || errorMessage.includes("Cannot POST")
-          ? "Unable to connect to the backend server. Please ensure the backend is running on port 8000."
-          : errorMessage,
+        text: errorMessage,
       }
       setMessages((prev) => [...prev, aiMsg])
       setError(errorMessage)
@@ -175,7 +157,7 @@ export default function ChatPanel() {
                             <li key={idx}>
                               <span className="font-medium">{s.pdf}</span>{" "}
                               <span className="text-muted-foreground">
-                                (chunk {s.chunkId}, score {s.score.toFixed(3)})
+                                (chunk {s.chunkId}, score {Number.isFinite(s.score) ? s.score.toFixed(3) : "—"})
                               </span>
                             </li>
                           ))}

@@ -4,19 +4,19 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ### Environment Setup
 
-Create a `.env.local` file in the `frontend_latest` directory:
+The browser calls the **FastAPI backend directly** (`lib/api.ts`). You must set the public base URL (no trailing slash).
+
+Create a `.env.local` file in the `frontend_latest` directory (see `.env.example`):
 
 ```env
-# Backend API URL (supports both client and server-side)
+# Local backend
 NEXT_PUBLIC_API_URL=http://localhost:8000
-# OR for production:
-# NEXT_PUBLIC_API_URL=https://sih2025-chatbot-working.onrender.com
 
-# Alternative server-only variable (used if NEXT_PUBLIC_API_URL not set)
-API_URL=http://localhost:8000
+# Production (Render)
+# NEXT_PUBLIC_API_URL=https://sih2025-chatbot-working.onrender.com
 ```
 
-**Note:** If no environment variable is set, the app will default to `http://localhost:8000` for local development.
+On **Vercel**, add the same variable under Project → Settings → Environment Variables. Endpoints used: `POST /chat/ask` and `POST /embed/pdf` on that base URL.
 
 ### Running the Development Server
 

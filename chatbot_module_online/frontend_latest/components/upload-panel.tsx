@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { uploadDocument } from "@/lib/api";
 
 type Uploaded = {
   name: string;
@@ -54,32 +55,15 @@ export default function UploadPanel() {
         const file = pendingFiles[i];
         
         try {
-          const formData = new FormData();
-          formData.append("patientId", patientId);
-          formData.append("file", file);
-
-          // Use Next.js API route which proxies to backend
-          const res = await fetch("/api/upload", {
-            method: "POST",
-            body: formData,
-          });
-
-          if (!res.ok) {
-            const errorData = await res.json().catch(() => ({ 
-              error: "Unknown error", 
-              message: `Upload failed for ${file.name}` 
-            }));
-            const errorMsg = errorData.message || errorData.error || `Upload failed for ${file.name}`;
-            errors.push(`${file.name}: ${errorMsg}`);
-            continue;
-          }
-
-          const data = await res.json();
+          const data = await uploadDocument({ patientId, file });
           uploadedFiles.push({
-            name: data.name || file.name,
-            size: data.size || file.size,
-            lastModified: data.lastModified || file.lastModified,
+            name: data.name,
+            size: data.size,
+            lastModified: data.lastModified,
           });
+          if (data.warning) {
+            console.warn(`Upload ${file.name}:`, data.warning);
+          }
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : `Upload failed for ${file.name}`;
           errors.push(`${file.name}: ${errorMsg}`);
