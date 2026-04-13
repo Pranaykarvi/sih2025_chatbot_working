@@ -1,167 +1,209 @@
-import os
-import logging
-import asyncio
-from dotenv import load_dotenv
-import httpx
-from typing import List
+"""
+LLM providers: Gemini (primary) and Groq (fallback).
+Uses official SDKs, structured logging, short timeouts, and one retry per provider.
+"""
 
-# Load environment variables from a .env file
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from typing import Awaitable, Callable, List
+
+from dotenv import load_dotenv
+
 load_dotenv()
 
-# --- Logging Setup ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- Configuration ---
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GEMINI_MODEL = (os.getenv("GEMINI_MODEL") or "gemini-1.5-flash").strip()
+# Override on Render if Groq deprecates an id: e.g. llama-3.1-8b-instant
+GROQ_MODEL = (os.getenv("GROQ_MODEL") or "llama3-8b-8192").strip()
+GEMINI_TIMEOUT_S = 45.0
+GROQ_TIMEOUT_S = 45.0
 
-# Debug: Log API key presence (not the actual keys)
-logger.info("Gemini API Key present: %s", bool(GEMINI_API_KEY))
-logger.info("Groq API Key present: %s", bool(GROQ_API_KEY))
+FALLBACK_ANSWER = (
+    "AI service is temporarily unavailable. Please try again later."
+)
 
-# -------------------------------
-# Provider Query Functions
-# -------------------------------
+
+def _env_api_key(name: str) -> str | None:
+    """Read API key; strip whitespace and accidental surrounding quotes."""
+    raw = os.getenv(name)
+    if raw is None:
+        return None
+    v = raw.strip().strip('"').strip("'")
+    return v or None
+
+
+GEMINI_API_KEY = _env_api_key("GEMINI_API_KEY")
+GROQ_API_KEY = _env_api_key("GROQ_API_KEY")
+
+logger.info("Gemini API key configured: %s", bool(GEMINI_API_KEY))
+logger.info("Groq API key configured: %s", bool(GROQ_API_KEY))
+
+
+def _call_gemini_sync(prompt: str) -> str:
+    import google.generativeai as genai
+
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY is missing or empty")
+
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel(GEMINI_MODEL)
+    response = model.generate_content(prompt)
+
+    if not response.candidates:
+        block = getattr(response, "prompt_feedback", None)
+        logger.error(
+            "Gemini returned no candidates (possibly blocked). prompt_feedback=%s",
+            block,
+        )
+        raise RuntimeError("Gemini returned no candidates (blocked or empty response)")
+
+    try:
+        raw_text = response.text
+    except ValueError as e:
+        logger.error("Gemini response.text unavailable (safety/block): %s", e)
+        raise RuntimeError("Gemini blocked or invalid response text") from e
+
+    text = (raw_text or "").strip()
+    if not text:
+        logger.error("Gemini returned empty text after parse; candidates=%s", response.candidates)
+        raise RuntimeError("Gemini returned empty text")
+    return text
+
+
+def _call_groq_sync(prompt: str) -> str:
+    from groq import Groq
+
+    if not GROQ_API_KEY:
+        raise ValueError("GROQ_API_KEY is missing or empty")
+
+    client = Groq(api_key=GROQ_API_KEY)
+    completion = client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=1024,
+        temperature=0.7,
+    )
+    choice = completion.choices[0] if completion.choices else None
+    if not choice or not choice.message:
+        logger.error("Groq returned no choices: %s", completion)
+        raise RuntimeError("Groq returned no message")
+    content = (choice.message.content or "").strip()
+    if not content:
+        raise RuntimeError("Groq returned empty content")
+    return content
+
+
+async def _run_sync(fn: Callable[[], str]) -> str:
+    return await asyncio.to_thread(fn)
+
+
+async def _with_one_retry(name: str, attempt_fn: Callable[[], Awaitable[str]]) -> str:
+    last_exc: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            text = await attempt_fn()
+            if text and text.strip():
+                return text.strip()
+            logger.warning("%s attempt %d: empty text", name, attempt)
+            last_exc = RuntimeError("empty response")
+        except Exception as e:
+            last_exc = e
+            if attempt == 1:
+                logger.warning(
+                    "%s attempt %d failed: %s: %s (retrying)",
+                    name,
+                    attempt,
+                    type(e).__name__,
+                    e,
+                )
+            else:
+                logger.error(
+                    "%s attempt %d failed: %s: %s",
+                    name,
+                    attempt,
+                    type(e).__name__,
+                    e,
+                    exc_info=True,
+                )
+    assert last_exc is not None
+    raise last_exc
+
 
 async def query_gemini(prompt: str) -> str:
-    """Sends a prompt to the Google Gemini API and returns the response."""
-    if not GEMINI_API_KEY:
-        raise ValueError("Gemini API key is missing from environment variables.")
+    async def _once() -> str:
+        return await asyncio.wait_for(
+            _run_sync(lambda: _call_gemini_sync(prompt)),
+            timeout=GEMINI_TIMEOUT_S,
+        )
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}]
-    }
+    return await _with_one_retry("Gemini", _once)
 
-    try:
-        logger.info("Sending request to Gemini API...")
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(url, json=payload, headers=headers)
-            response.raise_for_status()  # Will raise an exception for 4xx/5xx responses
-            data = response.json()
-            logger.info("Received response from Gemini API")
-            logger.debug("Raw response: %s", data)
-            return data['candidates'][0]['content']['parts'][0]['text']
-    except KeyError as e:
-        logger.error("Failed to parse Gemini API response: %s. Response data: %s", str(e), data)
-        raise
-    except Exception as e:
-        logger.error("Error in Gemini API call: %s", str(e))
-        raise
 
 async def query_groq(prompt: str) -> str:
-    """Sends a prompt to the Groq API and returns the response."""
-    if not GROQ_API_KEY:
-        raise ValueError("Groq API key is missing from environment variables.")
+    async def _once() -> str:
+        return await asyncio.wait_for(
+            _run_sync(lambda: _call_groq_sync(prompt)),
+            timeout=GROQ_TIMEOUT_S,
+        )
 
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "meta-llama/llama-4-maverick-17b-128e-instruct",  # Updated to use a valid model
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 300,
-        "temperature": 0.7
-    }
+    return await _with_one_retry("Groq", _once)
 
-    try:
-        logger.info("Sending request to Groq API...")
-        async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post(url, json=payload, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            logger.info("Received response from Groq API")
-            logger.debug("Raw response: %s", data)
-            return data['choices'][0]['message']['content']
-    except KeyError as e:
-        logger.error("Failed to parse Groq API response: %s. Response data: %s", str(e), data)
-        raise
-    except Exception as e:
-        logger.error("Error in Groq API call: %s", str(e))
-        raise
 
-# -------------------------------
-# Fallback Chain Logic
-# -------------------------------
-
-async def generate_text(prompt: str, provider_order: List[str] = None) -> str:
+async def generate_text(
+    prompt: str,
+    provider_order: List[str] | None = None,
+    *,
+    allow_fallback_message: bool = True,
+) -> str:
     """
-    Attempts to generate text using a list of providers, falling back to the next
-    one if a provider fails.
+    Try providers in order (default Gemini -> Groq).
+    If all fail and allow_fallback_message is True, returns FALLBACK_ANSWER instead of raising.
     """
-    # Default order of providers if none is specified
     provider_order = provider_order or ["gemini", "groq"]
-    
-    logger.info("Starting text generation with providers order: %s", provider_order)
-    logger.info("Prompt: %s", prompt[:100] + "..." if len(prompt) > 100 else prompt)
+    logger.info("LLM chain start order=%s prompt_chars=%d", provider_order, len(prompt))
 
     provider_map = {
         "gemini": query_gemini,
         "groq": query_groq,
     }
 
-    errors = []
+    errors: list[str] = []
+
     for provider_name in provider_order:
+        fn = provider_map.get(provider_name.lower())
+        if not fn:
+            logger.warning("Unknown provider skipped: %s", provider_name)
+            continue
         try:
-            query_func = provider_map.get(provider_name.lower())
-            if not query_func:
-                logger.warning("Unknown provider specified: %s", provider_name)
-                continue
-
-            logger.info("Attempting to generate text with provider: %s", provider_name)
-            text = await query_func(prompt)
-
-            if text and text.strip():
-                logger.info("Provider '%s' succeeded.", provider_name)
+            logger.info("LLM trying provider=%s", provider_name)
+            text = await fn(prompt)
+            if text:
+                logger.info("LLM success provider=%s out_chars=%d", provider_name, len(text))
                 return text
-            else:
-                error_msg = f"Provider '{provider_name}' returned an empty response."
-                logger.warning(error_msg)
-                errors.append(error_msg)
-
-        except httpx.HTTPStatusError as e:
-            error_msg = f"Provider '{provider_name}' failed with HTTP status {e.response.status_code}: {e.response.text}"
-            logger.warning(error_msg)
-            errors.append(error_msg)
         except Exception as e:
-            error_msg = f"An unexpected error occurred with provider '{provider_name}': {str(e)}"
-            logger.warning(error_msg)
-            errors.append(error_msg)
+            err = f"{provider_name}: {type(e).__name__}: {e}"
+            # Traceback already logged on final retry inside query_*; keep summary here
+            logger.error("LLM provider failed (summary): %s", err)
+            errors.append(err)
 
-    # If all providers in the list have failed
-    error_details = "\n".join(errors)
-    logger.error("All providers failed. Details:\n%s", error_details)
-    raise RuntimeError(f"All LLM providers failed to generate a response. Details:\n{error_details}")
+    detail = "; ".join(errors) if errors else "no providers attempted"
+    logger.error("All LLM providers failed. %s", detail)
+
+    if allow_fallback_message:
+        return FALLBACK_ANSWER
+
+    raise RuntimeError(f"All LLM providers failed. {detail}")
 
 
-# --- Example Usage ---
-async def main():
-    """Main function to run an example."""
-    my_prompt = "Explain the concept of asynchronous programming in Python in a single paragraph."
-
-    try:
-        # Example 1: Default order (Gemini -> Groq)
-        print("--- Attempting with default order (Gemini first) ---")
-        response = await generate_text(my_prompt)
-        print("Response:", response)
-
-        print("\n" + "="*50 + "\n")
-
-        # Example 2: Custom order (Groq -> Gemini)
-        print("--- Attempting with custom order (Groq first) ---")
-        response_groq_first = await generate_text(my_prompt, provider_order=["groq", "gemini"])
-        print("Response:", response_groq_first)
-
-    except RuntimeError as e:
-        print(f"Error: {e}")
-    except ValueError as e:
-        print(f"Configuration Error: {e}")
+async def main() -> None:
+    """CLI smoke test."""
+    out = await generate_text("Say hello in one word.", provider_order=["gemini", "groq"])
+    print(out)
 
 
 if __name__ == "__main__":
-    # To run this async code, we use asyncio.run()
     asyncio.run(main())

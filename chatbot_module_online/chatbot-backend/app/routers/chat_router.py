@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from app.services.embeddings import embed_texts
 from app.db.supabase_client import supabase
-from app.services.llm_providers import generate_text
+from app.services.llm_providers import FALLBACK_ANSWER, generate_text
 import logging
 import time
 
@@ -105,13 +105,23 @@ async def ask(req: ChatRequest):
         f"Patient Context:\n{context_text}\n\nQuestion: {req.question}\n\nAnswer concisely and provide sources."
     )
 
-    # 5️⃣ Call LLM providers (Gemini -> Groq)
+    # 5️⃣ Call LLM providers (Gemini -> Groq); graceful fallback string if all fail
+    provider_order = req.provider_order or ["gemini", "groq"]
     try:
-        provider_order = req.provider_order or ["gemini", "groq"]
-        answer = await generate_text(prompt=prompt, provider_order=provider_order)
+        answer = await generate_text(
+            prompt=prompt,
+            provider_order=provider_order,
+            allow_fallback_message=True,
+        )
     except Exception:
-        logger.exception("All LLM providers failed")
-        raise HTTPException(status_code=503, detail="All LLM providers failed")
+        logger.exception("LLM layer raised unexpectedly; using fallback answer")
+        answer = FALLBACK_ANSWER
+
+    if answer == FALLBACK_ANSWER:
+        logger.warning(
+            "Chat using fallback answer (all providers failed or returned empty) patient_id=%s",
+            req.patient_id,
+        )
 
     # 6️⃣ Return answer with sources
     return {
