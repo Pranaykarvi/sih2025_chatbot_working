@@ -146,3 +146,4 @@ __pycache__/
 .Python
 venv/
 .venv/
+.lock-env/
