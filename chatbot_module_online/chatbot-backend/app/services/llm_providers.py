@@ -1,6 +1,7 @@
 """
-LLM providers: Gemini (google-genai) primary, Groq fallback.
-Dynamic model fallbacks, circuit breaker, latency logs, context-aware final fallback.
+LLM providers: Gemini (google-genai) primary, Groq mandatory fallback.
+Explicit ORDER (gemini → groq); Groq is never circuit-skipped.
+Dynamic model fallbacks, Gemini-only circuit breaker, latency logs, context-aware final fallback.
 All blocking SDK calls run in asyncio.to_thread.
 """
 
@@ -35,8 +36,11 @@ GROQ_TIMEOUT_S = 60.0
 # Minimum non-whitespace characters for an LLM reply to count as successful.
 MIN_RESPONSE_CHARS = 10
 
-# Soft circuit breaker: skip provider after this many consecutive logical failures.
+# Soft circuit breaker (Gemini only). Groq is NEVER skipped — it is mandatory fallback.
 CIRCUIT_THRESHOLD = 3
+
+# Explicit LLM execution order (Gemini first, Groq always attempted if Gemini does not return valid text).
+ORDER: list[str] = ["gemini", "groq"]
 
 GROQ_SYSTEM_MESSAGE = "You are a helpful medical assistant."
 
@@ -61,6 +65,9 @@ _FAILED_COUNTS: dict[str, int] = {}
 
 
 def should_skip(provider: str) -> bool:
+    """Groq is never circuit-skipped so fallback always runs when Gemini fails."""
+    if provider.lower() == "groq":
+        return False
     with _circuit_lock:
         return _FAILED_COUNTS.get(provider, 0) >= CIRCUIT_THRESHOLD
 
@@ -105,6 +112,20 @@ def is_valid_response(text: str | None, *, min_len: int = MIN_RESPONSE_CHARS) ->
         return False
     s = text.strip()
     return len(s) >= min_len
+
+
+def _is_gemini_quota_exhausted(exc: BaseException) -> bool:
+    """Detect quota / rate limit so we fail fast to Groq without silent retry storms."""
+    msg = f"{type(exc).__name__} {exc}".upper()
+    if "RESOURCE_EXHAUSTED" in msg:
+        return True
+    if "429" in msg:
+        return True
+    if "QUOTA" in msg and ("EXCEED" in msg or "EXHAUST" in msg):
+        return True
+    if "RATE_LIMIT" in msg or "RATE-LIMIT" in msg:
+        return True
+    return False
 
 
 def final_fallback(
@@ -250,6 +271,12 @@ def _call_gemini_sync(prompt: str) -> str:
                 e,
                 exc_info=is_last,
             )
+            if _is_gemini_quota_exhausted(e):
+                logger.warning(
+                    "Gemini quota exhausted or rate-limited on model=%s → skipping remaining Gemini models",
+                    model_id,
+                )
+                raise RuntimeError(f"Gemini quota exhausted: {e}") from e
 
     assert last_error is not None
     logger.error("Gemini: all models failed tried=%s", models)
@@ -390,19 +417,54 @@ async def query_gemini(prompt: str) -> str:
             )
             raise
 
-    try:
-        text = await _with_one_retry("Gemini", _once)
-        logger.info(
-            "Gemini total latency_s=%.3f (includes retries)",
-            time.perf_counter() - t_total,
-        )
-        return text
-    except asyncio.TimeoutError:
-        logger.error(
-            "Gemini aborted after total latency_s=%.3f",
-            time.perf_counter() - t_total,
-        )
-        raise
+    last_exc: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            text = await _once()
+            if text and text.strip():
+                logger.info(
+                    "Gemini total latency_s=%.3f (includes retries)",
+                    time.perf_counter() - t_total,
+                )
+                return text.strip()
+            logger.warning(
+                "Gemini provider retry: attempt %d/2 empty text",
+                attempt,
+            )
+            last_exc = RuntimeError("empty response")
+        except asyncio.TimeoutError as te:
+            last_exc = te
+            logger.error(
+                "Gemini provider retry: attempt %d/2 asyncio.TimeoutError",
+                attempt,
+            )
+            if attempt == 2:
+                raise
+        except Exception as e:
+            last_exc = e
+            if _is_gemini_quota_exhausted(e):
+                logger.warning(
+                    "Gemini quota exhausted → skipping outer retries (attempt %d/2)",
+                    attempt,
+                )
+                raise
+            if attempt == 1:
+                logger.warning(
+                    "Gemini provider retry: attempt %d/2 failed %s: %s (retrying)",
+                    attempt,
+                    type(e).__name__,
+                    e,
+                )
+            else:
+                logger.error(
+                    "Gemini provider retry: attempt %d/2 failed %s: %s",
+                    attempt,
+                    type(e).__name__,
+                    e,
+                    exc_info=True,
+                )
+    assert last_exc is not None
+    raise last_exc
 
 
 async def query_groq(prompt: str) -> str:
@@ -445,20 +507,37 @@ async def generate_text(
     retrieval_context: str | None = None,
 ) -> str:
     """
-    Validate keys → optional circuit skip → Gemini → Groq → context-aware final fallback.
-    Never returns None. Uses retrieval_context for final_fallback when LLMs fail.
+    Explicit order: Gemini → Groq (mandatory if Gemini fails) → context-aware final fallback.
+    Groq is never circuit-skipped. Never returns None when allow_fallback_message is True.
     """
-    provider_order = provider_order or ["gemini", "groq"]
+    raw_order = provider_order or list(ORDER)
+    normalized_order: list[str] = []
+    seen: set[str] = set()
+    for p in raw_order:
+        key = (p or "").lower().strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        normalized_order.append(key)
+
+    errors: list[str] = []
 
     if not GEMINI_API_KEY and not GROQ_API_KEY:
         logger.error("generate_text: no GEMINI_API_KEY and no GROQ_API_KEY")
         if allow_fallback_message:
-            return final_fallback(prompt, retrieval_context)
+            out = final_fallback(prompt, retrieval_context)
+            fb_kind = (
+                "context_fallback"
+                if (retrieval_context and str(retrieval_context).strip())
+                else "static_fallback"
+            )
+            logger.info("FINAL RESPONSE GENERATED BY: %s", fb_kind)
+            return out
         raise RuntimeError("No LLM API keys configured")
 
     logger.info(
         "generate_text start order=%s prompt_chars=%d context_chars=%s gemini_models=%s groq_models=%s",
-        provider_order,
+        normalized_order,
         len(prompt),
         len(retrieval_context or "") if retrieval_context else 0,
         _gemini_models_to_try(),
@@ -470,77 +549,100 @@ async def generate_text(
         "groq": query_groq,
     }
 
-    errors: list[str] = []
-
-    for provider_name in provider_order:
-        key = provider_name.lower()
-        fn = provider_map.get(key)
-        if not fn:
-            logger.warning("Unknown provider skipped: %s", provider_name)
-            continue
-
-        if key == "gemini" and not GEMINI_API_KEY:
+    # --- GEMINI ---
+    if "gemini" in normalized_order:
+        if not GEMINI_API_KEY:
             logger.warning("Skipping provider=gemini: missing GEMINI_API_KEY")
             errors.append("gemini: no API key")
-            continue
-        if key == "groq" and not GROQ_API_KEY:
-            logger.warning("Skipping provider=groq: missing GROQ_API_KEY")
-            errors.append("groq: no API key")
-            continue
-
-        if should_skip(key):
+        elif should_skip("gemini"):
             logger.warning(
-                "Skipping provider=%s: circuit open (failures >= %d)",
-                key,
+                "Skipping provider=gemini: circuit open (failures >= %d)",
                 CIRCUIT_THRESHOLD,
             )
-            errors.append(f"{key}: circuit open")
-            continue
-
-        try:
-            logger.info("Trying provider=%s", key)
-            text = await fn(prompt)
-
-            if is_valid_response(text):
-                reset_failure(key)
-                logger.info(
-                    "generate_text success provider=%s out_chars=%d",
-                    key,
-                    len(text.strip()),
+            errors.append("gemini: circuit open")
+        else:
+            try:
+                logger.info("Trying provider=gemini")
+                text = await provider_map["gemini"](prompt)
+                if is_valid_response(text):
+                    reset_failure("gemini")
+                    logger.info(
+                        "LLM SUCCESS provider=gemini out_chars=%d",
+                        len(text.strip()),
+                    )
+                    logger.info("FINAL RESPONSE GENERATED BY: gemini")
+                    return text.strip()
+                logger.error(
+                    "Provider=gemini returned invalid/short response; treating as failure",
                 )
-                return text.strip()
+                mark_failure("gemini")
+                errors.append("gemini: invalid short response")
+            except asyncio.TimeoutError:
+                mark_failure("gemini")
+                logger.error("generate_text provider=gemini asyncio.TimeoutError")
+                errors.append("gemini: TimeoutError")
+            except Exception as e:
+                mark_failure("gemini")
+                if _is_gemini_quota_exhausted(e):
+                    logger.warning(
+                        "Gemini quota exhausted or rate-limited → failing over to Groq: %s",
+                        e,
+                    )
+                else:
+                    logger.warning("Gemini failed: %s", e, exc_info=True)
+                errors.append(f"gemini: {type(e).__name__}: {e}")
 
-            logger.error(
-                "Provider=%s returned invalid/short response; treating as failure",
-                key,
-            )
-            mark_failure(key)
-            errors.append(f"{key}: invalid short response")
-        except asyncio.TimeoutError:
-            mark_failure(key)
-            err = f"{key}: TimeoutError"
-            logger.error("generate_text provider=%s asyncio.TimeoutError", key)
-            errors.append(err)
-        except Exception as e:
-            mark_failure(key)
-            err = f"{key}: {type(e).__name__}: {e}"
-            logger.error(
-                "generate_text provider=%s failed: %s",
-                key,
-                err,
-                exc_info=True,
-            )
-            errors.append(err)
+    # --- GROQ (mandatory fallback; circuit breaker never skips Groq) ---
+    if "groq" in normalized_order:
+        if not GROQ_API_KEY:
+            logger.warning("Skipping provider=groq: missing GROQ_API_KEY")
+            errors.append("groq: no API key")
+        else:
+            try:
+                logger.info("Trying provider=groq")
+                text = await provider_map["groq"](prompt)
+                if is_valid_response(text):
+                    reset_failure("groq")
+                    logger.info(
+                        "LLM SUCCESS provider=groq out_chars=%d",
+                        len(text.strip()),
+                    )
+                    logger.info("FINAL RESPONSE GENERATED BY: groq")
+                    return text.strip()
+                logger.error(
+                    "Provider=groq returned invalid/short response; treating as failure",
+                )
+                mark_failure("groq")
+                errors.append("groq: invalid short response")
+            except asyncio.TimeoutError:
+                mark_failure("groq")
+                logger.error("generate_text provider=groq asyncio.TimeoutError")
+                errors.append("groq: TimeoutError")
+            except Exception as e:
+                mark_failure("groq")
+                logger.error("Groq failed: %s", e, exc_info=True)
+                errors.append(f"groq: {type(e).__name__}: {e}")
 
-    detail = "; ".join(errors) if errors else "no providers attempted"
+    for key in normalized_order:
+        if key not in provider_map:
+            logger.warning("Unknown provider skipped: %s", key)
+
+    detail = "; ".join(errors) if errors else "no LLM providers ran successfully"
     logger.error("generate_text: all providers exhausted. %s", detail)
 
     if allow_fallback_message:
         out = final_fallback(prompt, retrieval_context)
+        fb_kind = (
+            "context_fallback"
+            if (retrieval_context and str(retrieval_context).strip())
+            else "static_fallback"
+        )
+        logger.error("Both providers failed → using fallback (%s)", fb_kind)
         logger.warning(
             "generate_text: returning final_fallback context_used=%s",
             bool(retrieval_context and retrieval_context.strip()),
         )
+        logger.info("FINAL RESPONSE GENERATED BY: %s", fb_kind)
         return out
 
     raise RuntimeError(f"All LLM providers failed. {detail}")
