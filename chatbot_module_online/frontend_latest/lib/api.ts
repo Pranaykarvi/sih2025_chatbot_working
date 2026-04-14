@@ -6,6 +6,10 @@
 const CHAT_ASK_PATH = "/chat/ask"
 const EMBED_PDF_PATH = "/embed/pdf"
 
+/** Render cold start + LLM can exceed 60s; keep below typical browser ~5min limits */
+const CHAT_FETCH_TIMEOUT_MS = 180_000
+const UPLOAD_FETCH_TIMEOUT_MS = 180_000
+
 export function getApiBaseUrl(): string {
   const raw = process.env.NEXT_PUBLIC_API_URL?.trim()
   if (!raw) {
@@ -76,6 +80,9 @@ export async function askQuestion(input: AskQuestionInput): Promise<AskQuestionR
   const base = getApiBaseUrl()
   const url = `${base}${CHAT_ASK_PATH}`
 
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), CHAT_FETCH_TIMEOUT_MS)
+
   let res: Response
   try {
     res = await fetch(url, {
@@ -87,12 +94,21 @@ export async function askQuestion(input: AskQuestionInput): Promise<AskQuestionR
         top_k: input.topK ?? 3,
         use_cloud: true,
       }),
+      signal: controller.signal,
     })
   } catch (e) {
+    const name = e instanceof Error ? e.name : ""
+    if (name === "AbortError") {
+      throw new Error(
+        `The request timed out after ${CHAT_FETCH_TIMEOUT_MS / 1000}s. If the backend was asleep (e.g. Render), try again — cold starts can take 1–2 minutes.`
+      )
+    }
     const msg = e instanceof Error ? e.message : "Network error"
     throw new Error(
       `Could not reach the backend at ${base}. Check NEXT_PUBLIC_API_URL and CORS. ${msg}`
     )
+  } finally {
+    clearTimeout(timeoutId)
   }
 
   const data = await parseJsonBody<{
@@ -153,17 +169,29 @@ export async function uploadDocument(input: UploadDocumentInput): Promise<Upload
   formData.append("patient_id", input.patientId)
   formData.append("file", input.file)
 
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), UPLOAD_FETCH_TIMEOUT_MS)
+
   let res: Response
   try {
     res = await fetch(url, {
       method: "POST",
       body: formData,
+      signal: controller.signal,
     })
   } catch (e) {
+    const name = e instanceof Error ? e.name : ""
+    if (name === "AbortError") {
+      throw new Error(
+        `Upload timed out after ${UPLOAD_FETCH_TIMEOUT_MS / 1000}s. Try a smaller file or wait if the server was cold.`
+      )
+    }
     const msg = e instanceof Error ? e.message : "Network error"
     throw new Error(
       `Could not reach the backend at ${base}. Check NEXT_PUBLIC_API_URL. ${msg}`
     )
+  } finally {
+    clearTimeout(timeoutId)
   }
 
   const data = await parseJsonBody<{

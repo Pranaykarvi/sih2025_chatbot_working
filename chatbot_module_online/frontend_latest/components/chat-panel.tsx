@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { CardDescription, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -46,10 +46,23 @@ export default function ChatPanel() {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
+  /** After a few seconds, explain cold start so users don’t assume failure */
+  const [showColdStartHint, setShowColdStartHint] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   // Ref for the input bar (type bar)
   const inputBarRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!loading) {
+      setShowColdStartHint(false)
+      return
+    }
+    const id = window.setTimeout(() => setShowColdStartHint(true), 6000)
+    return () => {
+      window.clearTimeout(id)
+    }
+  }, [loading])
 
   // Scrolls to the input bar (type bar) at the bottom
   function scrollToInputBar() {
@@ -171,14 +184,21 @@ export default function ChatPanel() {
           </div>
         )}
         {loading && (
-          <div className="mt-4 flex gap-2 pl-1 items-center animate-slide-in-up">
-            <span className="h-3 w-3 animate-bounce rounded-full bg-gradient-to-r from-purple-500 to-pink-500 shadow-lg [animation-delay:-0.2s]" />
-            <span className="h-3 w-3 animate-bounce rounded-full bg-gradient-to-r from-pink-500 to-blue-500 shadow-lg [animation-delay:-0.1s]" />
-            <span className="h-3 w-3 animate-bounce rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 shadow-lg" />
-            <span className="ml-2 text-sm font-medium bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 bg-clip-text text-transparent">
-              AI is thinking...
-            </span>
-            <span className="sr-only">Assistant is typing</span>
+          <div className="mt-4 flex flex-col gap-2 pl-1 animate-slide-in-up max-w-xl">
+            <div className="flex gap-2 items-center">
+              <span className="h-3 w-3 animate-bounce rounded-full bg-gradient-to-r from-purple-500 to-pink-500 shadow-lg [animation-delay:-0.2s]" />
+              <span className="h-3 w-3 animate-bounce rounded-full bg-gradient-to-r from-pink-500 to-blue-500 shadow-lg [animation-delay:-0.1s]" />
+              <span className="h-3 w-3 animate-bounce rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 shadow-lg" />
+              <span className="ml-2 text-sm font-medium bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 bg-clip-text text-transparent">
+                AI is thinking…
+              </span>
+              <span className="sr-only">Assistant is loading; please wait for the response</span>
+            </div>
+            {showColdStartHint && (
+              <p className="text-xs text-muted-foreground leading-relaxed pl-1 border-l-2 border-purple-400/50 pl-3">
+                First request after idle can take 1–2 minutes while the server wakes up. Please keep this tab open — the answer will appear here when ready.
+              </p>
+            )}
           </div>
         )}
         {/* Invisible div for scrolling to input bar */}
