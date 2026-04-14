@@ -3,7 +3,11 @@ from pydantic import BaseModel
 from typing import Optional, List
 from app.services.embeddings import embed_texts
 from app.db.supabase_client import supabase
-from app.services.llm_providers import FALLBACK_ANSWER, generate_text
+from app.services.llm_providers import (
+    FALLBACK_ANSWER,
+    generate_text,
+    is_context_fallback_answer,
+)
 import logging
 import time
 
@@ -112,14 +116,20 @@ async def ask(req: ChatRequest):
             prompt=prompt,
             provider_order=provider_order,
             allow_fallback_message=True,
+            retrieval_context=context_text,
         )
     except Exception:
-        logger.exception("LLM layer raised unexpectedly; using fallback answer")
+        logger.exception("LLM layer raised unexpectedly; using static fallback answer")
         answer = FALLBACK_ANSWER
 
-    if answer == FALLBACK_ANSWER:
+    if is_context_fallback_answer(answer):
         logger.warning(
-            "Chat using fallback answer (all providers failed or returned empty) patient_id=%s",
+            "Chat using context-only fallback (LLMs unavailable) patient_id=%s",
+            req.patient_id,
+        )
+    elif answer == FALLBACK_ANSWER:
+        logger.warning(
+            "Chat using static fallback answer patient_id=%s",
             req.patient_id,
         )
 
