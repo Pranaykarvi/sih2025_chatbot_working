@@ -63,6 +63,9 @@ def is_context_fallback_answer(text: str) -> bool:
 _circuit_lock = threading.Lock()
 _FAILED_COUNTS: dict[str, int] = {}
 
+_groq_client_init_logged = False
+_groq_client_init_log_lock = threading.Lock()
+
 
 def should_skip(provider: str) -> bool:
     """Groq is never circuit-skipped so fallback always runs when Gemini fails."""
@@ -284,6 +287,7 @@ def _call_gemini_sync(prompt: str) -> str:
 
 
 def _call_groq_sync(prompt: str) -> str:
+    global _groq_client_init_logged
     from groq import Groq
 
     if not GROQ_API_KEY:
@@ -294,6 +298,11 @@ def _call_groq_sync(prompt: str) -> str:
         raise RuntimeError("No Groq model ids configured")
 
     client = Groq(api_key=GROQ_API_KEY, timeout=GROQ_TIMEOUT_S)
+    with _groq_client_init_log_lock:
+        if not _groq_client_init_logged:
+            logger.info("Groq client initialized successfully")
+            _groq_client_init_logged = True
+
     last_error: Exception | None = None
 
     for i, model_id in enumerate(models):

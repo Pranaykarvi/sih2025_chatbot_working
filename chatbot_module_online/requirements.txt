@@ -3,7 +3,9 @@
 # FastAPI was upgraded from 0.95.x → 0.115.x: google-genai requires Pydantic v2; old FastAPI
 # required Pydantic v1 and cannot be installed together with google-genai.
 #
-# httpx is 0.28.1 (not 0.27.x): google-genai needs httpx>=0.28.1; supabase needs httpx<0.29.
+# httpx must stay >=0.28.1,<1: google-genai requires httpx>=0.28.1 (do NOT pin 0.27.x — breaks Gemini).
+# groq>=0.13 is required for httpx 0.28+ (older groq passed httpx Client(proxies=...) which 0.28 removed).
+# Single httpx in the tree: pin it here and avoid duplicate httpx lines elsewhere.
 
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
@@ -20,4 +22,4 @@ httpx==0.28.1
 tenacity==9.1.3
 
 google-genai==1.46.0
-groq==0.9.0
+groq==1.1.2
